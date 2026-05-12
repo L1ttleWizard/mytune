@@ -108,17 +108,77 @@ class PlayerService extends ChangeNotifier {
     final controller = _controller;
     if (controller == null) return;
     await controller.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
-    // The web player UI takes a variable amount of time to render after
-    // navigation. Retry clicking the play button a few times so we don't
-    // miss the window when it becomes available.
-    for (final delay in const [
-      Duration(milliseconds: 1500),
-      Duration(milliseconds: 2500),
-      Duration(milliseconds: 4000),
-      Duration(milliseconds: 6000),
-    ]) {
-      Future.delayed(delay, _clickPlayIfPaused);
-    }
+    // Install a MutationObserver that clicks the play button the moment
+    // it appears in the DOM, then disconnects. This avoids waiting for
+    // arbitrary fixed delays and makes playback start as soon as Spotify
+    // is ready to accept a click.
+    await Future.delayed(const Duration(milliseconds: 200));
+    await controller.evaluateJavascript(source: r'''
+      (function(){
+        if (window.__mytuneAutoplayInstalled) {
+          window.__mytuneAutoplayActive = true;
+          return;
+        }
+        window.__mytuneAutoplayInstalled = true;
+        window.__mytuneAutoplayActive = true;
+
+        var SELECTORS = [
+          '[data-testid="control-button-playpause"]',
+          '[data-testid="play-button"]',
+          'button[aria-label^="Play"]',
+          'button[aria-label^="play"]',
+          'button[aria-label^="Воспроизвести"]'
+        ];
+
+        function looksLikePlay(el) {
+          if (!el) return false;
+          var label = ((el.getAttribute('aria-label') || el.textContent || '') + '').toLowerCase();
+          return label.indexOf('play') !== -1 || label.indexOf('воспроизвести') !== -1;
+        }
+
+        function tryClick() {
+          if (!window.__mytuneAutoplayActive) return false;
+          for (var i = 0; i < SELECTORS.length; i++) {
+            var nodes = document.querySelectorAll(SELECTORS[i]);
+            for (var j = 0; j < nodes.length; j++) {
+              if (looksLikePlay(nodes[j])) {
+                nodes[j].click();
+                window.__mytuneAutoplayActive = false;
+                return true;
+              }
+            }
+          }
+          return false;
+        }
+
+        // Try right away — often the button is already there.
+        if (tryClick()) return;
+
+        var attempts = 0;
+        var maxAttempts = 60; // ~6 seconds at 100ms intervals
+        var poll = setInterval(function(){
+          attempts++;
+          if (tryClick() || attempts >= maxAttempts) {
+            clearInterval(poll);
+          }
+        }, 100);
+      })();
+    ''');
+    // Hard cap fallback — if the observer somehow fails, click once more
+    // at 8 seconds so we don't leave the user stuck.
+    Future.delayed(const Duration(seconds: 8), _clickPlayIfPaused);
+  }
+
+  /// Seek to a position by setting the underlying <audio> element's
+  /// currentTime directly inside the web player.
+  Future<void> seek(Duration position) async {
+    final ms = position.inMilliseconds;
+    await _controller?.evaluateJavascript(source: '''
+      (function(){
+        var a = document.querySelector('audio');
+        if (a) a.currentTime = ${ms / 1000.0};
+      })();
+    ''');
   }
 
   Future<void> togglePlay() async {
