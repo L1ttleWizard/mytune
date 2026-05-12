@@ -9,8 +9,21 @@ class AppConstants {
       String.fromEnvironment('SPOTIFY_CLIENT_ID',
           defaultValue: 'REPLACE_ME_WITH_YOUR_SPOTIFY_CLIENT_ID');
 
-  /// Custom URL scheme registered as a Spotify redirect URI in the dashboard.
-  static const String redirectUri = 'mytune://callback';
+  /// Redirect URI registered in the Spotify dashboard.
+  ///
+  /// Spotify tightened Redirect URI validation in late 2024 and custom
+  /// schemes (e.g. `mytune://callback`) are no longer reliably accepted
+  /// for new apps. We use an HTTPS URL instead and rely on the WebView's
+  /// `shouldOverrideUrlLoading` to intercept the redirect before any real
+  /// browser navigation happens, so the URL itself never has to resolve.
+  ///
+  /// You can override this at build time with
+  /// `--dart-define=SPOTIFY_REDIRECT_URI=https://...` if you've registered
+  /// a different URI in your Spotify app.
+  static const String redirectUri = String.fromEnvironment(
+    'SPOTIFY_REDIRECT_URI',
+    defaultValue: 'https://example.com',
+  );
 
   /// Scopes for Spotify Web API. None of these require Premium.
   static const List<String> scopes = [

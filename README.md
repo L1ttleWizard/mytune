@@ -23,21 +23,35 @@ which means **a Spotify free account is enough**, no Premium required.
 1. Install Flutter 3.24+ and the Android SDK.
 2. Register an application at
    <https://developer.spotify.com/dashboard>:
-   - Add `mytune://callback` as a Redirect URI.
+   - Add a Redirect URI. **Spotify tightened validation in late 2024 and
+     custom schemes are no longer reliably accepted for new apps** —
+     use an HTTPS URL such as `https://example.com`. The WebView
+     intercepts the redirect before any real navigation happens, so the
+     URL itself never has to resolve.
+   - Click **Save** after adding the URI — the dashboard does NOT
+     auto-save.
    - Enable **Web API**.
    - Copy the Client ID.
 3. Run:
 
    ```bash
    flutter pub get
-   flutter run --dart-define=SPOTIFY_CLIENT_ID=<your-client-id>
+   flutter run \
+     --dart-define=SPOTIFY_CLIENT_ID=<your-client-id> \
+     --dart-define=SPOTIFY_REDIRECT_URI=https://example.com
    ```
 
-   Or for a release-ish debug APK:
+   Or for a release APK:
 
    ```bash
-   flutter build apk --debug --dart-define=SPOTIFY_CLIENT_ID=<your-client-id>
+   flutter build apk --release \
+     --dart-define=SPOTIFY_CLIENT_ID=<your-client-id> \
+     --dart-define=SPOTIFY_REDIRECT_URI=https://example.com
    ```
+
+   The `SPOTIFY_REDIRECT_URI` define is optional; it defaults to
+   `https://example.com`. Set it to whatever you registered in the
+   Spotify dashboard.
 
 ## Project layout
 

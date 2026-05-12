@@ -92,10 +92,7 @@ class PlayerService extends ChangeNotifier {
   /// We navigate the web player to the track URL. open.spotify.com handles
   /// the actual streaming, ads, and DRM — we just point it at the right URL.
   Future<void> playTrack(String trackId) async {
-    final url = WebUri('https://open.spotify.com/track/$trackId');
-    await _controller?.loadUrl(urlRequest: URLRequest(url: url));
-    // Kick autoplay after navigation settles.
-    Future.delayed(const Duration(milliseconds: 1500), _clickPlayIfPaused);
+    await _navigateAndAutoplay('https://open.spotify.com/track/$trackId');
   }
 
   Future<void> playContext(String contextUri) async {
@@ -103,9 +100,25 @@ class PlayerService extends ChangeNotifier {
     // open.spotify.com paths use /playlist/ID, /album/ID.
     final parts = contextUri.split(':');
     if (parts.length < 3) return;
-    final url = WebUri('https://open.spotify.com/${parts[1]}/${parts[2]}');
-    await _controller?.loadUrl(urlRequest: URLRequest(url: url));
-    Future.delayed(const Duration(milliseconds: 1500), _clickPlayIfPaused);
+    await _navigateAndAutoplay(
+        'https://open.spotify.com/${parts[1]}/${parts[2]}');
+  }
+
+  Future<void> _navigateAndAutoplay(String url) async {
+    final controller = _controller;
+    if (controller == null) return;
+    await controller.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+    // The web player UI takes a variable amount of time to render after
+    // navigation. Retry clicking the play button a few times so we don't
+    // miss the window when it becomes available.
+    for (final delay in const [
+      Duration(milliseconds: 1500),
+      Duration(milliseconds: 2500),
+      Duration(milliseconds: 4000),
+      Duration(milliseconds: 6000),
+    ]) {
+      Future.delayed(delay, _clickPlayIfPaused);
+    }
   }
 
   Future<void> togglePlay() async {

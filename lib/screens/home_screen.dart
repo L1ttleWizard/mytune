@@ -7,6 +7,7 @@ import '../services/player_service.dart';
 import '../services/spotify_api.dart';
 import '../widgets/bottom_player_bar.dart';
 import '../widgets/hidden_player_webview.dart';
+import 'library_screen.dart';
 import 'playlist_screen.dart';
 import 'search_screen.dart';
 
@@ -25,19 +26,32 @@ class _HomeScreenState extends State<HomeScreen> {
     final pages = [
       const _HomeTab(),
       const SearchScreen(),
-      const _LibraryTab(),
+      const LibraryScreen(),
     ];
     return Scaffold(
       body: Stack(
         children: [
-          // The hidden web player lives behind the entire app so it survives
-          // tab switches and keeps audio playing while the user browses.
-          const Offstage(
-            offstage: true,
+          // The hidden web player lives behind the entire app so it
+          // survives tab switches and keeps audio playing while the user
+          // browses.
+          //
+          // It must stay in the widget tree and be laid out (NOT
+          // `Offstage`) — InAppWebView is a native Android view and only
+          // initialises when it has a real size. open.spotify.com refuses
+          // to render its player UI on tiny viewports, so we give the
+          // WebView a desktop-sized canvas via OverflowBox and then clip
+          // it down to a single pixel so the user never sees it.
+          const ClipRect(
             child: SizedBox(
               width: 1,
               height: 1,
-              child: HiddenPlayerWebView(loginMode: false),
+              child: OverflowBox(
+                maxWidth: 1280,
+                maxHeight: 800,
+                child: IgnorePointer(
+                  child: HiddenPlayerWebView(loginMode: false),
+                ),
+              ),
             ),
           ),
           SafeArea(child: pages[_tab]),
@@ -196,16 +210,4 @@ class _TrackTile extends StatelessWidget {
   }
 }
 
-class _LibraryTab extends StatelessWidget {
-  const _LibraryTab();
-  @override
-  Widget build(BuildContext context) => const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'Library coming soon.\nThis prototype focuses on Home + Search + Playlist.',
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-}
+
