@@ -12,8 +12,10 @@ class BottomPlayerBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final player = context.watch<PlayerService>();
     final s = player.state;
-    if (!s.hasTrack) {
-      // Hide the bar entirely until something is actually playing.
+    // Show the bar as soon as the underlying web player has loaded so the
+    // user always sees a player UI; once a track is actually loaded it
+    // gets populated with metadata.
+    if (!s.hasTrack && !player.webPlayerReady) {
       return const SizedBox.shrink();
     }
     final progress = s.duration.inMilliseconds == 0
@@ -23,9 +25,12 @@ class BottomPlayerBar extends StatelessWidget {
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: InkWell(
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const NowPlayingScreen()),
-        ),
+        onTap: !s.hasTrack
+            ? null
+            : () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) => const NowPlayingScreen()),
+                ),
         child: SizedBox(
           height: 66,
           child: Column(
@@ -54,7 +59,10 @@ class BottomPlayerBar extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            s.title ?? '',
+                            s.title ??
+                                (player.webPlayerReady
+                                    ? 'Choose a track'
+                                    : 'Loading…'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style:

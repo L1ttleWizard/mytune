@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 /// Snapshot of what the underlying Spotify web player is doing right now.
@@ -23,7 +24,7 @@ class PlayerState {
   final Duration position;
   final Duration duration;
 
-  bool get hasTrack => trackId != null;
+  bool get hasTrack => trackId != null || title != null;
 
   PlayerState copyWith({
     String? trackId,
@@ -53,9 +54,22 @@ class PlayerState {
 /// the web player exposes; state updates come back through a JS handler
 /// channel that polls navigator.mediaSession and DOM scrubber values.
 class PlayerService extends ChangeNotifier {
+  /// Method channel into the native PlaybackService that keeps the app
+  /// process alive while audio is playing in the background.
+  static const MethodChannel _serviceChannel =
+      MethodChannel('mytune/playback_service');
+
   InAppWebViewController? _controller;
   PlayerState _state = PlayerState();
   bool _webPlayerReady = false;
+  bool _serviceRunning = false;
+
+  // Debounce: ignore back-to-back navigation requests so a user tapping
+  // a track several times in a row doesn't trigger multiple WebView
+  // navigations (and thus multiple playback starts).
+  DateTime _lastNavAt = DateTime.fromMillisecondsSinceEpoch(0);
+  String? _lastNavUrl;
+  static const Duration _navDebounce = Duration(milliseconds: 700);
 
   PlayerState get state => _state;
   bool get webPlayerReady => _webPlayerReady;
@@ -84,7 +98,34 @@ class PlayerService extends ChangeNotifier {
           milliseconds: (data['durationMs'] as num?)?.toInt() ??
               _state.duration.inMilliseconds),
     );
+    // Keep the foreground service in sync with actual playback state so
+    // Android doesn't kill the process while audio is playing.
+    if (_state.isPlaying) {
+      _startServiceIfNeeded();
+    } else {
+      _stopServiceIfNeeded();
+    }
     notifyListeners();
+  }
+
+  Future<void> _startServiceIfNeeded() async {
+    if (_serviceRunning) return;
+    _serviceRunning = true;
+    try {
+      await _serviceChannel.invokeMethod('start');
+    } catch (_) {
+      _serviceRunning = false;
+    }
+  }
+
+  Future<void> _stopServiceIfNeeded() async {
+    if (!_serviceRunning) return;
+    _serviceRunning = false;
+    try {
+      await _serviceChannel.invokeMethod('stop');
+    } catch (_) {
+      // ignore
+    }
   }
 
   /// Load a track by Spotify ID and start playback.
@@ -107,6 +148,14 @@ class PlayerService extends ChangeNotifier {
   Future<void> _navigateAndAutoplay(String url) async {
     final controller = _controller;
     if (controller == null) return;
+    final now = DateTime.now();
+    if (_lastNavUrl == url &&
+        now.difference(_lastNavAt) < _navDebounce) {
+      // Same destination within the debounce window — ignore.
+      return;
+    }
+    _lastNavUrl = url;
+    _lastNavAt = now;
     await controller.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
     // Install a MutationObserver that clicks the play button the moment
     // it appears in the DOM, then disconnects. This avoids waiting for
