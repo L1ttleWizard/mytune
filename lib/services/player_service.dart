@@ -63,6 +63,10 @@ class PlayerService extends ChangeNotifier {
   PlayerState _state = PlayerState();
   bool _webPlayerReady = false;
   bool _serviceRunning = false;
+  Map<String, dynamic> _lastJsState = const {};
+
+  /// Last raw JS payload from the bridge. Exposed for the debug overlay.
+  Map<String, dynamic> get lastJsState => _lastJsState;
 
   // Debounce: ignore back-to-back navigation requests so a user tapping
   // a track several times in a row doesn't trigger multiple WebView
@@ -84,6 +88,7 @@ class PlayerService extends ChangeNotifier {
   }
 
   void updateFromJs(Map<String, dynamic> data) {
+    _lastJsState = data;
     _state = _state.copyWith(
       trackId: data['trackId'] as String?,
       title: data['title'] as String?,

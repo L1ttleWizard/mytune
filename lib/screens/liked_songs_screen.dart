@@ -3,9 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/auth_service.dart';
+import '../services/liked_tracks_cache.dart';
 import '../services/player_service.dart';
 import '../services/spotify_api.dart';
-import '../widgets/bottom_player_bar.dart';
+import '../widgets/app_bottom_chrome.dart';
 
 class LikedSongsScreen extends StatefulWidget {
   const LikedSongsScreen({super.key});
@@ -18,20 +19,73 @@ class _LikedSongsScreenState extends State<LikedSongsScreen> {
   static const int _pageSize = 50;
 
   late final SpotifyApi _api = SpotifyApi(context.read<AuthService>());
+  final LikedTracksCache _cache = LikedTracksCache();
+
   final List<Map<String, dynamic>> _items = [];
   bool _initialLoadDone = false;
   bool _loadingMore = false;
   bool _hasMore = true;
   int _total = 0;
+  bool _usedCache = false;
+  String _status = '';
   Object? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadInitial();
+    _bootstrap();
   }
 
-  Future<void> _loadInitial() async {
+  Future<void> _bootstrap() async {
+    final cached = await _cache.load();
+    if (cached != null && cached.items.isNotEmpty) {
+      // Show cache instantly.
+      setState(() {
+        _items.addAll(cached.items);
+        _total = cached.total;
+        _hasMore = false;
+        _initialLoadDone = true;
+        _usedCache = true;
+        _status = 'Cached ${cached.items.length} tracks';
+      });
+      // Validate in the background.
+      _revalidateAgainstApi(cached);
+    } else {
+      await _fetchAll();
+    }
+  }
+
+  Future<void> _revalidateAgainstApi(CachedLikedTracks cached) async {
+    try {
+      setState(() => _status = 'Checking for updates…');
+      final res = await _api.mySavedTracks(limit: _pageSize, offset: 0);
+      final page = ((res['items'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>();
+      final apiTotal = (res['total'] as num?)?.toInt() ?? page.length;
+      final apiFirstId = firstTrackIdOf(page);
+      if (apiTotal == cached.total && apiFirstId == cached.firstTrackId) {
+        if (mounted) setState(() => _status = '');
+        return;
+      }
+      // Something changed — re-sync entirely.
+      if (mounted) {
+        setState(() {
+          _items.clear();
+          _items.addAll(page);
+          _total = apiTotal;
+          _hasMore = _items.length < _total;
+          _usedCache = false;
+          _status =
+              'List changed (was ${cached.total}, now $apiTotal) — refreshing…';
+        });
+      }
+      await _loadRemainingInBackground();
+    } catch (_) {
+      if (mounted) setState(() => _status = '');
+    }
+  }
+
+  Future<void> _fetchAll() async {
     try {
       final res = await _api.mySavedTracks(limit: _pageSize, offset: 0);
       if (!mounted) return;
@@ -43,8 +97,7 @@ class _LikedSongsScreenState extends State<LikedSongsScreen> {
         _hasMore = _items.length < _total;
         _initialLoadDone = true;
       });
-      // Kick off background pagination without blocking the screen.
-      _loadRemainingInBackground();
+      await _loadRemainingInBackground();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -74,8 +127,18 @@ class _LikedSongsScreenState extends State<LikedSongsScreen> {
           _hasMore = _items.length < _total;
         });
       }
+      // Done — persist to cache.
+      await _cache.save(CachedLikedTracks(
+        items: _items,
+        total: _total,
+        firstTrackId: firstTrackIdOf(_items),
+        savedAt: DateTime.now(),
+      ));
+      if (mounted) {
+        setState(() => _status = 'Cached ${_items.length} tracks');
+      }
     } catch (_) {
-      // swallow — partial list is better than crashing
+      // partial — don't overwrite a good cache
     } finally {
       if (mounted) setState(() => _loadingMore = false);
     }
@@ -84,8 +147,30 @@ class _LikedSongsScreenState extends State<LikedSongsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Liked Songs')),
-      bottomNavigationBar: const BottomPlayerBar(),
+      appBar: AppBar(
+        title: const Text('Liked Songs'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh from Spotify',
+            icon: const Icon(Icons.refresh),
+            onPressed: _initialLoadDone
+                ? () async {
+                    await _cache.clear();
+                    setState(() {
+                      _items.clear();
+                      _initialLoadDone = false;
+                      _hasMore = true;
+                      _usedCache = false;
+                      _status = '';
+                      _error = null;
+                    });
+                    await _fetchAll();
+                  }
+                : null,
+          ),
+        ],
+      ),
+      bottomNavigationBar: const AppBottomChrome(),
       body: !_initialLoadDone
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -95,7 +180,6 @@ class _LikedSongsScreenState extends State<LikedSongsScreen> {
   }
 
   Widget _buildList() {
-    // +1 for header, +1 for footer (loading indicator or "all loaded" line).
     const headerCount = 1;
     const footerCount = 1;
     final total = headerCount + _items.length + footerCount;
@@ -140,9 +224,13 @@ class _LikedSongsScreenState extends State<LikedSongsScreen> {
               Text(
                 _hasMore
                     ? '${_items.length} of $_total tracks'
-                    : '$_total tracks',
+                    : '$_total tracks${_usedCache ? " (from cache)" : ""}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
+              if (_status.isNotEmpty)
+                Text(_status,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.grey, fontStyle: FontStyle.italic)),
               const SizedBox(height: 8),
               ElevatedButton.icon(
                 icon: const Icon(Icons.play_arrow),

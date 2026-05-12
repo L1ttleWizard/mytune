@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -5,7 +7,8 @@ import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/player_service.dart';
 import '../services/spotify_api.dart';
-import '../widgets/bottom_player_bar.dart';
+import '../services/tab_switcher.dart';
+import '../widgets/app_bottom_chrome.dart';
 import '../widgets/hidden_player_webview.dart';
 import 'library_screen.dart';
 import 'playlist_screen.dart';
@@ -19,11 +22,44 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _tab = 0;
   bool _showWebView = false;
+
+  void _showDebugDialog(BuildContext context) {
+    final player = context.read<PlayerService>();
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final js = player.lastJsState;
+        return AlertDialog(
+          title: const Text('Player state'),
+          content: SingleChildScrollView(
+            child: Text(
+              'webPlayerReady: ${player.webPlayerReady}\n'
+              'hasTrack: ${player.state.hasTrack}\n'
+              'isPlaying: ${player.state.isPlaying}\n'
+              'trackId: ${player.state.trackId}\n'
+              'title: ${player.state.title}\n'
+              'artist: ${player.state.artist}\n'
+              'artworkUrl: ${player.state.artworkUrl}\n'
+              'pos/dur: ${player.state.position.inMilliseconds}/${player.state.duration.inMilliseconds} ms\n'
+              '\nRaw JS:\n${const JsonEncoder.withIndent('  ').convert(js)}',
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final tabIndex = context.watch<TabSwitcher>().index;
     final pages = [
       const _HomeTab(),
       const SearchScreen(),
@@ -44,6 +80,11 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('MyTune'),
         actions: [
           IconButton(
+            tooltip: 'Show player state (debug)',
+            icon: const Icon(Icons.bug_report),
+            onPressed: () => _showDebugDialog(context),
+          ),
+          IconButton(
             tooltip: 'Toggle web player view (debug)',
             icon: Icon(_showWebView ? Icons.visibility_off : Icons.web),
             onPressed: () => setState(() => _showWebView = !_showWebView),
@@ -62,27 +103,12 @@ class _HomeScreenState extends State<HomeScreen> {
             Positioned.fill(
               child: Material(
                 color: Theme.of(context).scaffoldBackgroundColor,
-                child: SafeArea(child: pages[_tab]),
+                child: SafeArea(child: pages[tabIndex]),
               ),
             ),
         ],
       ),
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const BottomPlayerBar(),
-          NavigationBar(
-            selectedIndex: _tab,
-            onDestinationSelected: (i) => setState(() => _tab = i),
-            destinations: const [
-              NavigationDestination(icon: Icon(Icons.home), label: 'Home'),
-              NavigationDestination(icon: Icon(Icons.search), label: 'Search'),
-              NavigationDestination(
-                  icon: Icon(Icons.library_music), label: 'Library'),
-            ],
-          ),
-        ],
-      ),
+      bottomNavigationBar: const AppBottomChrome(),
     );
   }
 }

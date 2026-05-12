@@ -128,8 +128,9 @@ class _HiddenPlayerWebViewState extends State<HiddenPlayerWebView> {
   Future<void> _installStateBridge(InAppWebViewController c) async {
     await c.evaluateJavascript(source: r'''
       (function(){
-        if (window.__mytuneBridgeInstalled) return;
-        window.__mytuneBridgeInstalled = true;
+        if (window.__mytuneBridge) {
+          clearInterval(window.__mytuneBridge);
+        }
 
         function pickArt(art) {
           if (!art || !art.length) return null;
@@ -145,14 +146,51 @@ class _HiddenPlayerWebViewState extends State<HiddenPlayerWebView> {
           return el ? (el.textContent || '').trim() : null;
         }
 
+        function parseTime(t) {
+          if (!t) return null;
+          var parts = t.split(':').map(function(x){ return parseInt(x, 10); });
+          if (parts.some(isNaN)) return null;
+          if (parts.length === 2) return (parts[0]*60 + parts[1]) * 1000;
+          if (parts.length === 3) return (parts[0]*3600 + parts[1]*60 + parts[2]) * 1000;
+          return null;
+        }
+
+        function findAudio() {
+          // Spotify uses a normal <audio> element in the main document.
+          // Search same-origin iframes as a fallback just in case.
+          var a = document.querySelector('audio');
+          if (a) return a;
+          var iframes = document.querySelectorAll('iframe');
+          for (var i = 0; i < iframes.length; i++) {
+            try {
+              var doc = iframes[i].contentDocument;
+              if (doc) {
+                var inner = doc.querySelector('audio');
+                if (inner) return inner;
+              }
+            } catch (e) { /* cross-origin */ }
+          }
+          return null;
+        }
+
         function readState() {
           var md = (navigator.mediaSession && navigator.mediaSession.metadata) || {};
-          var audio = document.querySelector('audio');
-          var isPlaying = !!(audio && !audio.paused && audio.currentTime > 0);
+          var audio = findAudio();
 
-          // trackId: prefer the link inside the now-playing widget, fall
-          // back to parsing the current URL when we're sitting on a track
-          // page.
+          // ----- isPlaying: combine three independent signals -----
+          var isPlaying = false;
+          if (audio && !audio.paused) isPlaying = true;
+          var ps = navigator.mediaSession && navigator.mediaSession.playbackState;
+          if (ps === 'playing') isPlaying = true;
+          var ppBtn = document.querySelector('[data-testid="control-button-playpause"]');
+          if (ppBtn) {
+            var lbl = (ppBtn.getAttribute('aria-label') || '').toLowerCase().trim();
+            if (lbl.indexOf('pause') === 0 || lbl.indexOf('пауза') === 0) {
+              isPlaying = true;
+            }
+          }
+
+          // ----- trackId -----
           var trackId = null;
           var nowPlayingLink = document.querySelector(
             '[data-testid="now-playing-widget"] a[href^="/track/"]'
@@ -166,13 +204,13 @@ class _HiddenPlayerWebViewState extends State<HiddenPlayerWebView> {
             if (loc) trackId = loc[1];
           }
 
-          // Title / artist fallbacks: pull from the now-playing widget DOM
-          // when mediaSession.metadata isn't set yet.
+          // ----- title / artist -----
           var title = md.title;
           if (!title) {
             title = textOf('[data-testid="now-playing-widget"] [data-testid="context-item-link"]')
                   || textOf('[data-testid="context-item-info-title"]')
-                  || textOf('[data-testid="now-playing-widget"] a[href^="/track/"]');
+                  || textOf('[data-testid="now-playing-widget"] a[href^="/track/"]')
+                  || textOf('main [data-testid="entityTitle"]');
           }
           var artist = md.artist;
           if (!artist) {
@@ -180,15 +218,46 @@ class _HiddenPlayerWebViewState extends State<HiddenPlayerWebView> {
                   || textOf('[data-testid="now-playing-widget"] a[href^="/artist/"]');
           }
 
+          // ----- artwork -----
+          var artworkUrl = pickArt(md.artwork);
+          if (!artworkUrl) {
+            var img = document.querySelector('[data-testid="now-playing-widget"] img')
+                  || document.querySelector('[data-testid="cover-art-image"] img')
+                  || document.querySelector('img[data-testid="cover-art-image"]');
+            if (img && img.src) artworkUrl = img.src;
+          }
+
+          // ----- position / duration -----
+          var positionMs = audio ? Math.floor(audio.currentTime * 1000) : null;
+          var durationMs = audio && audio.duration && isFinite(audio.duration)
+              ? Math.floor(audio.duration * 1000)
+              : null;
+          if (durationMs == null) {
+            durationMs = parseTime(textOf('[data-testid="playback-duration"]'));
+          }
+          if (positionMs == null) {
+            positionMs = parseTime(textOf('[data-testid="playback-position"]'));
+          }
+
           return {
             trackId: trackId,
             title: title || null,
             artist: artist || null,
             album: md.album || null,
-            artworkUrl: pickArt(md.artwork),
+            artworkUrl: artworkUrl || null,
             isPlaying: isPlaying,
-            positionMs: audio ? Math.floor(audio.currentTime * 1000) : null,
-            durationMs: audio ? Math.floor((audio.duration || 0) * 1000) : null
+            positionMs: positionMs,
+            durationMs: durationMs,
+            // Diagnostic fields visible to the debug overlay.
+            __debug: {
+              hasAudio: !!audio,
+              audioPaused: audio ? audio.paused : null,
+              audioCurrentTime: audio ? audio.currentTime : null,
+              audioDuration: audio ? audio.duration : null,
+              mediaSessionPlaybackState: ps || null,
+              ppBtnLabel: ppBtn ? ppBtn.getAttribute('aria-label') : null,
+              url: location.href
+            }
           };
         }
 
@@ -199,7 +268,7 @@ class _HiddenPlayerWebViewState extends State<HiddenPlayerWebView> {
           } catch (e) { /* swallow */ }
         }
 
-        setInterval(tick, 750);
+        window.__mytuneBridge = setInterval(tick, 750);
         window.flutter_inappwebview.callHandler('webPlayerReady', {});
       })();
     ''');

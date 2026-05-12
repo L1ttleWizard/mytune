@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/player_service.dart';
 import '../services/spotify_api.dart';
-import '../widgets/bottom_player_bar.dart';
+import '../widgets/app_bottom_chrome.dart';
 
 class PlaylistScreen extends StatefulWidget {
   const PlaylistScreen({super.key, required this.playlistId});
@@ -29,7 +29,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Playlist')),
-      bottomNavigationBar: const BottomPlayerBar(),
+      bottomNavigationBar: const AppBottomChrome(),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _future,
         builder: (context, snap) {
