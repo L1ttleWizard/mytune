@@ -46,8 +46,9 @@ class SpotifyApi {
   Future<Map<String, dynamic>> myTopTracks({int limit = 20}) =>
       _get('/me/top/tracks', {'limit': '$limit'});
 
-  Future<Map<String, dynamic>> mySavedTracks({int limit = 50}) =>
-      _get('/me/tracks', {'limit': '$limit'});
+  Future<Map<String, dynamic>> mySavedTracks(
+          {int limit = 50, int offset = 0}) =>
+      _get('/me/tracks', {'limit': '$limit', 'offset': '$offset'});
 
   Future<Map<String, dynamic>> newReleases({int limit = 20}) =>
       _get('/browse/new-releases', {'limit': '$limit'});
