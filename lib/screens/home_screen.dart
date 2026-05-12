@@ -20,6 +20,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
+  bool _showWebView = false;
 
   @override
   Widget build(BuildContext context) {
@@ -28,33 +29,42 @@ class _HomeScreenState extends State<HomeScreen> {
       const SearchScreen(),
       const LibraryScreen(),
     ];
+    // The hidden web player lives behind the entire app so it survives
+    // tab switches and keeps audio playing while the user browses.
+    //
+    // It must stay in the widget tree and be laid out (NOT `Offstage`)
+    // — InAppWebView is a native Android view and only initialises when
+    // it has a real size, and open.spotify.com refuses to render its
+    // full player UI on tiny viewports. We always give it the entire
+    // screen, then cover it with the visible UI so the user doesn't
+    // see it. A debug toggle in the AppBar uncovers the WebView so we
+    // can verify what Spotify actually shows inside.
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('MyTune'),
+        actions: [
+          IconButton(
+            tooltip: 'Toggle web player view (debug)',
+            icon: Icon(_showWebView ? Icons.visibility_off : Icons.web),
+            onPressed: () => setState(() => _showWebView = !_showWebView),
+          ),
+        ],
+      ),
       body: Stack(
         children: [
-          // The hidden web player lives behind the entire app so it
-          // survives tab switches and keeps audio playing while the user
-          // browses.
-          //
-          // It must stay in the widget tree and be laid out (NOT
-          // `Offstage`) — InAppWebView is a native Android view and only
-          // initialises when it has a real size. open.spotify.com refuses
-          // to render its player UI on tiny viewports, so we give the
-          // WebView a desktop-sized canvas via OverflowBox and then clip
-          // it down to a single pixel so the user never sees it.
-          const ClipRect(
-            child: SizedBox(
-              width: 1,
-              height: 1,
-              child: OverflowBox(
-                maxWidth: 1280,
-                maxHeight: 800,
-                child: IgnorePointer(
-                  child: HiddenPlayerWebView(loginMode: false),
-                ),
-              ),
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: !_showWebView,
+              child: const HiddenPlayerWebView(loginMode: false),
             ),
           ),
-          SafeArea(child: pages[_tab]),
+          if (!_showWebView)
+            Positioned.fill(
+              child: Material(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                child: SafeArea(child: pages[_tab]),
+              ),
+            ),
         ],
       ),
       bottomNavigationBar: Column(

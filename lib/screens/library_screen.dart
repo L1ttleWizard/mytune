@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/player_service.dart';
 import '../services/spotify_api.dart';
+import 'liked_songs_screen.dart';
 import 'playlist_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
@@ -85,10 +86,37 @@ class _PlaylistList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // +1 because we prepend a synthetic "Liked Songs" tile at index 0.
     return ListView.builder(
-      itemCount: playlists.length,
+      itemCount: playlists.length + 1,
       itemBuilder: (_, i) {
-        final p = playlists[i];
+        if (i == 0) {
+          return ListTile(
+            leading: Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.purpleAccent.shade400,
+                    Colors.white.withOpacity(0.1),
+                  ],
+                ),
+              ),
+              child: const Icon(Icons.favorite, color: Colors.white),
+            ),
+            title: const Text('Liked Songs'),
+            subtitle: const Text('Your saved tracks'),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const LikedSongsScreen(),
+              ),
+            ),
+          );
+        }
+        final p = playlists[i - 1];
         final images = (p['images'] as List?)?.cast<Map<String, dynamic>>() ?? [];
         final url = images.isNotEmpty ? images.last['url'] as String? : null;
         return ListTile(

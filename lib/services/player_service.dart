@@ -134,15 +134,40 @@ class PlayerService extends ChangeNotifier {
   }
 
   Future<void> _clickPlayIfPaused() async {
-    await _controller?.evaluateJavascript(source: '''
+    // Try several known selectors. Spotify periodically renames testids and
+    // the page sometimes shows a big "play" button on the track page itself
+    // before the persistent transport bar appears, so we try the transport
+    // button first and fall back to the in-page play button.
+    await _controller?.evaluateJavascript(source: r'''
       (function(){
-        var btn = document.querySelector('[data-testid="control-button-playpause"]');
-        if (!btn) return;
-        // If aria-label contains "Play" we're paused, click to start.
-        var label = (btn.getAttribute('aria-label') || '').toLowerCase();
-        if (label.indexOf('play') === 0 || label.indexOf('воспроизвести') === 0) {
-          btn.click();
+        function clickIfPlay(el) {
+          if (!el) return false;
+          var label = ((el.getAttribute('aria-label') || el.textContent || '') + '').toLowerCase();
+          if (label.indexOf('play') !== -1 || label.indexOf('воспроизвести') !== -1) {
+            el.click();
+            return true;
+          }
+          return false;
         }
+        var selectors = [
+          '[data-testid="control-button-playpause"]',
+          '[data-testid="play-button"]',
+          'button[aria-label^="Play"]',
+          'button[aria-label^="play"]',
+          'button[aria-label^="Воспроизвести"]'
+        ];
+        for (var i = 0; i < selectors.length; i++) {
+          var nodes = document.querySelectorAll(selectors[i]);
+          for (var j = 0; j < nodes.length; j++) {
+            if (clickIfPlay(nodes[j])) return;
+          }
+        }
+        // Last resort: dispatch a Space key, which the Spotify web player
+        // listens for to toggle playback.
+        var ev = new KeyboardEvent('keydown', {
+          key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true
+        });
+        document.body.dispatchEvent(ev);
       })();
     ''');
   }
