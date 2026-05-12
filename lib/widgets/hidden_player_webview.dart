@@ -84,6 +84,17 @@ class _HiddenPlayerWebViewState extends State<HiddenPlayerWebView> {
           callback: (_) => player.markWebPlayerReady(),
         );
       },
+      // Critical for Spotify: the web player uses Widevine DRM to stream
+      // audio. Without granting the PROTECTED_MEDIA_ID permission the page
+      // shows "Playback of protected content is not enabled" and refuses
+      // to play anything. We grant any permission the page asks for since
+      // we trust open.spotify.com.
+      onPermissionRequest: (controller, request) async {
+        return PermissionResponse(
+          resources: request.resources,
+          action: PermissionResponseAction.GRANT,
+        );
+      },
       shouldOverrideUrlLoading: (controller, navAction) async {
         final url = navAction.request.url?.toString() ?? '';
         if (url.startsWith(AppConstants.redirectUri)) {
