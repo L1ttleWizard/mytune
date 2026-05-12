@@ -164,11 +164,7 @@ class PlayerService extends ChangeNotifier {
     await Future.delayed(const Duration(milliseconds: 200));
     await controller.evaluateJavascript(source: r'''
       (function(){
-        if (window.__mytuneAutoplayInstalled) {
-          window.__mytuneAutoplayActive = true;
-          return;
-        }
-        window.__mytuneAutoplayInstalled = true;
+        // Reset on every navigation so the new page starts fresh.
         window.__mytuneAutoplayActive = true;
 
         var SELECTORS = [
@@ -179,14 +175,30 @@ class PlayerService extends ChangeNotifier {
           'button[aria-label^="Воспроизвести"]'
         ];
 
+        // Strict: aria-label must START with "play" (matches "Play",
+        // "Play Mr. Brightside", etc.) and must NOT start with "playlist"
+        // (the side-nav playlist links also have play-prefixed labels).
         function looksLikePlay(el) {
           if (!el) return false;
-          var label = ((el.getAttribute('aria-label') || el.textContent || '') + '').toLowerCase();
-          return label.indexOf('play') !== -1 || label.indexOf('воспроизвести') !== -1;
+          var label = ((el.getAttribute('aria-label') || '') + '').toLowerCase().trim();
+          if (!label) return false;
+          if (label.indexOf('playlist') === 0) return false;
+          return label.indexOf('play') === 0
+                || label.indexOf('воспроизвести') === 0;
+        }
+
+        function alreadyPlaying() {
+          var a = document.querySelector('audio');
+          return !!(a && !a.paused && a.currentTime > 0);
         }
 
         function tryClick() {
           if (!window.__mytuneAutoplayActive) return false;
+          if (alreadyPlaying()) {
+            // Don't double-click — we'd just toggle pause / restart.
+            window.__mytuneAutoplayActive = false;
+            return true;
+          }
           for (var i = 0; i < SELECTORS.length; i++) {
             var nodes = document.querySelectorAll(SELECTORS[i]);
             for (var j = 0; j < nodes.length; j++) {
@@ -200,22 +212,19 @@ class PlayerService extends ChangeNotifier {
           return false;
         }
 
-        // Try right away — often the button is already there.
         if (tryClick()) return;
 
         var attempts = 0;
-        var maxAttempts = 60; // ~6 seconds at 100ms intervals
+        var maxAttempts = 80; // ~8 seconds at 100ms intervals
         var poll = setInterval(function(){
           attempts++;
           if (tryClick() || attempts >= maxAttempts) {
             clearInterval(poll);
+            window.__mytuneAutoplayActive = false;
           }
         }, 100);
       })();
     ''');
-    // Hard cap fallback — if the observer somehow fails, click once more
-    // at 8 seconds so we don't leave the user stuck.
-    Future.delayed(const Duration(seconds: 8), _clickPlayIfPaused);
   }
 
   /// Seek to a position by setting the underlying <audio> element's
@@ -240,45 +249,6 @@ class PlayerService extends ChangeNotifier {
 
   Future<void> previous() async {
     await _controller?.evaluateJavascript(source: _jsClick('control-button-skip-back'));
-  }
-
-  Future<void> _clickPlayIfPaused() async {
-    // Try several known selectors. Spotify periodically renames testids and
-    // the page sometimes shows a big "play" button on the track page itself
-    // before the persistent transport bar appears, so we try the transport
-    // button first and fall back to the in-page play button.
-    await _controller?.evaluateJavascript(source: r'''
-      (function(){
-        function clickIfPlay(el) {
-          if (!el) return false;
-          var label = ((el.getAttribute('aria-label') || el.textContent || '') + '').toLowerCase();
-          if (label.indexOf('play') !== -1 || label.indexOf('воспроизвести') !== -1) {
-            el.click();
-            return true;
-          }
-          return false;
-        }
-        var selectors = [
-          '[data-testid="control-button-playpause"]',
-          '[data-testid="play-button"]',
-          'button[aria-label^="Play"]',
-          'button[aria-label^="play"]',
-          'button[aria-label^="Воспроизвести"]'
-        ];
-        for (var i = 0; i < selectors.length; i++) {
-          var nodes = document.querySelectorAll(selectors[i]);
-          for (var j = 0; j < nodes.length; j++) {
-            if (clickIfPlay(nodes[j])) return;
-          }
-        }
-        // Last resort: dispatch a Space key, which the Spotify web player
-        // listens for to toggle playback.
-        var ev = new KeyboardEvent('keydown', {
-          key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true
-        });
-        document.body.dispatchEvent(ev);
-      })();
-    ''');
   }
 
   String _jsClick(String testid) => '''

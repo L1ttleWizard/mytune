@@ -120,9 +120,11 @@ class _HiddenPlayerWebViewState extends State<HiddenPlayerWebView> {
   /// Injects a polling script that reports the current playback state back
   /// to Dart by calling `window.flutter_inappwebview.callHandler`.
   ///
-  /// We watch `navigator.mediaSession.metadata` (Spotify sets it whenever a
-  /// track starts), plus the audio element for play/pause and progress, and
-  /// the now-playing widget DOM for fallback metadata.
+  /// We treat the underlying `<audio>` element as the source of truth for
+  /// play/pause and progress (`audio.paused` and `audio.currentTime`),
+  /// because the DOM `data-testid` selectors Spotify uses change over time
+  /// and don't always exist on every page. Track metadata comes from
+  /// `navigator.mediaSession.metadata` when available, with DOM fallbacks.
   Future<void> _installStateBridge(InAppWebViewController c) async {
     await c.evaluateJavascript(source: r'''
       (function(){
@@ -138,24 +140,50 @@ class _HiddenPlayerWebViewState extends State<HiddenPlayerWebView> {
           return best.src || null;
         }
 
+        function textOf(sel) {
+          var el = document.querySelector(sel);
+          return el ? (el.textContent || '').trim() : null;
+        }
+
         function readState() {
           var md = (navigator.mediaSession && navigator.mediaSession.metadata) || {};
           var audio = document.querySelector('audio');
+          var isPlaying = !!(audio && !audio.paused && audio.currentTime > 0);
+
+          // trackId: prefer the link inside the now-playing widget, fall
+          // back to parsing the current URL when we're sitting on a track
+          // page.
+          var trackId = null;
           var nowPlayingLink = document.querySelector(
             '[data-testid="now-playing-widget"] a[href^="/track/"]'
           );
-          var trackId = null;
           if (nowPlayingLink) {
             var m = nowPlayingLink.getAttribute('href').match(/\/track\/([^/?]+)/);
             if (m) trackId = m[1];
           }
-          var playBtn = document.querySelector('[data-testid="control-button-playpause"]');
-          var label = (playBtn && playBtn.getAttribute('aria-label') || '').toLowerCase();
-          var isPlaying = !!playBtn && (label.indexOf('pause') === 0 || label.indexOf('пауза') === 0);
+          if (!trackId) {
+            var loc = location.pathname.match(/\/track\/([^/?]+)/);
+            if (loc) trackId = loc[1];
+          }
+
+          // Title / artist fallbacks: pull from the now-playing widget DOM
+          // when mediaSession.metadata isn't set yet.
+          var title = md.title;
+          if (!title) {
+            title = textOf('[data-testid="now-playing-widget"] [data-testid="context-item-link"]')
+                  || textOf('[data-testid="context-item-info-title"]')
+                  || textOf('[data-testid="now-playing-widget"] a[href^="/track/"]');
+          }
+          var artist = md.artist;
+          if (!artist) {
+            artist = textOf('[data-testid="now-playing-widget"] [data-testid="context-item-info-subtitles"]')
+                  || textOf('[data-testid="now-playing-widget"] a[href^="/artist/"]');
+          }
+
           return {
             trackId: trackId,
-            title: md.title || null,
-            artist: md.artist || null,
+            title: title || null,
+            artist: artist || null,
             album: md.album || null,
             artworkUrl: pickArt(md.artwork),
             isPlaying: isPlaying,
